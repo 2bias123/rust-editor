@@ -1,8 +1,11 @@
 use std::io::{self, Read, Result, Write};
 use std::os::unix::io::AsRawFd;
 use termios::*;
+use termion::terminal_size;
 
 struct TerminalRawMode {
+    screen_rows: u16,
+    screen_cols: u16,
     original_termios: Termios,
 }
 
@@ -10,7 +13,8 @@ impl TerminalRawMode {
     fn new() -> Result<Self> {
         let stdin_fd = io::stdin().as_raw_fd();
         let original_termios = Termios::from_fd(stdin_fd)?;
-        Ok(TerminalRawMode { original_termios })
+        let (screen_cols, screen_rows) = Self::get_window_size();
+        Ok(TerminalRawMode { screen_rows, screen_cols, original_termios })
     }
 
     fn enable(&self) -> Result<()> {
@@ -54,21 +58,30 @@ impl TerminalRawMode {
     }
 
     fn editor_draw_rows(&self) {
-        let mut stdout = io::stdout().lock();
-        for y in 0..24 {
-            stdout.write_all(b"~\r\n");
+        for y in 0..self.screen_rows{
+            self.write_escape_seq("~\r\n");
         }
     }
 
     fn editor_refresh_screen(&self) -> Result<()>{
-        let mut stdout = io::stdout().lock();
-        stdout.write_all(b"\x1b[2J")?;
-        stdout.write_all(b"\x1b[H")?;
-
+        self.write_escape_seq("\x1b[2J");
+        self.write_escape_seq("\x1b[H");
         self.editor_draw_rows();
-        stdout.write_all(b"\x1b[H");
-        stdout.flush()?;
+        self.write_escape_seq("\x1b[H");
         Ok(())
+    }
+
+    fn write_escape_seq(&self, seq: &str) {
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(seq.as_bytes());
+        stdout.flush();
+    }
+
+    fn get_window_size() -> (u16, u16) {
+        let terminal_size = match terminal_size() {
+            Ok(term_size) => term_size,
+            Err(_) => {}
+        };
     }
 }
 
