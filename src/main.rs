@@ -42,14 +42,14 @@ impl TerminalRawMode {
         (k as u8) & 0x1f
     }
 
-    fn editor_read_key(&self) -> char {
+    fn editor_read_key() -> char {
         let mut buffer = [0; 1];
         while io::stdin().read_exact(&mut buffer).is_ok() {}
         buffer[0] as char
     }
 
     fn editor_process_key_pressed(&self) -> Result<bool> {
-        let c: char = self.editor_read_key();
+        let c: char = TerminalRawMode::editor_read_key();
         if c as u8 == Self::crtl_key(&self,'q') {
             self.editor_refresh_screen();
             return Ok(true)
@@ -59,29 +59,50 @@ impl TerminalRawMode {
 
     fn editor_draw_rows(&self) {
         for y in 0..self.screen_rows{
-            self.write_escape_seq("~\r\n");
+            TerminalRawMode::write_escape_seq("~\r\n");
         }
     }
 
     fn editor_refresh_screen(&self) -> Result<()>{
-        self.write_escape_seq("\x1b[2J");
-        self.write_escape_seq("\x1b[H");
+        TerminalRawMode::write_escape_seq("\x1b[2J");
+        TerminalRawMode::write_escape_seq("\x1b[H");
         self.editor_draw_rows();
-        self.write_escape_seq("\x1b[H");
+        TerminalRawMode::write_escape_seq("\x1b[H");
         Ok(())
     }
 
-    fn write_escape_seq(&self, seq: &str) {
+    fn write_escape_seq(seq: &str) {
         let mut stdout = io::stdout().lock();
-        stdout.write_all(seq.as_bytes());
-        stdout.flush();
+        stdout.write_all(seq.as_bytes()).unwrap();
+        stdout.flush().unwrap();
     }
 
-    fn get_window_size() -> (u16, u16) {
-        let terminal_size = match terminal_size() {
-            Ok(term_size) => term_size,
-            Err(_) => {}
-        };
+    fn get_curso_position() {
+        TerminalRawMode::write_escape_seq("\x1b[6n");
+        print!("\r\n");
+        let mut buffer = [0; 1];
+        while io::stdin().read_exact(&mut buffer).is_ok() {
+            if buffer[0].is_ascii_control() {
+                print!("{}\r\n",buffer[0] as u32)
+            } else {
+                println!("{} ('{}')", buffer[0] as u32, buffer[0]);
+            }
+        }
+        TerminalRawMode::editor_read_key();
+    }
+
+    fn get_window_size() -> (u16,u16){
+        TerminalRawMode::write_escape_seq("\x1b[999C\x1b[999B");
+        TerminalRawMode::editor_read_key();
+        // return TerminalRawMode::get_curso_position();
+        (80,24)
+        // let terminal_size = match terminal_size() {
+        //     Ok(term_size) => term_size,
+        //     Err(_) => {
+        //         self.write_escape_seq("\x1b[999C\x1b[999B");
+        //         self.editor_read_key();
+        //     }
+        // };
     }
 }
 
