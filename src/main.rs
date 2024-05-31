@@ -13,7 +13,7 @@ impl TerminalRawMode {
     fn new() -> Result<Self> {
         let stdin_fd = io::stdin().as_raw_fd();
         let original_termios = Termios::from_fd(stdin_fd)?;
-        let (screen_cols, screen_rows) = Self::get_window_size();
+        let (screen_cols, screen_rows) = Self::get_window_size()?;
         Ok(TerminalRawMode { screen_rows, screen_cols, original_termios })
     }
 
@@ -42,20 +42,40 @@ impl TerminalRawMode {
         (k as u8) & 0x1f
     }
 
-    fn editor_read_key() -> char {
+    fn editor_read_key() -> Result<char> {
         let mut buffer = [0; 1];
-        while io::stdin().read_exact(&mut buffer).is_ok() {}
-        buffer[0] as char
+        let stdin = io::stdin();
+        let mut handle = stdin.lock();
+
+        loop {
+            match handle.read(&mut buffer) {
+                Ok(0) => {
+                    continue;
+                },
+                Ok(_) => {
+                    return Ok(buffer[0] as char);
+                },
+                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {
+                    continue;
+                },
+                Err(e) => {
+                    return Err(e);
+                },
+            }
+        }
     }
 
     fn editor_process_key_pressed(&self) -> Result<bool> {
-        let c: char = TerminalRawMode::editor_read_key();
-        if c as u8 == Self::crtl_key(&self,'q') {
-            self.editor_refresh_screen();
-            return Ok(true)
+        match TerminalRawMode::editor_read_key() {
+            Ok(c) if c as u8 == self.crtl_key('q') => {
+                self.editor_refresh_screen()?;
+                Ok(true)
+            },
+            Ok(_) => Ok(false),
+            Err(e) => Err(e),
         }
-        Ok(false)
     }
+
 
     fn editor_draw_rows(&self) {
         for y in 0..self.screen_rows{
@@ -77,32 +97,49 @@ impl TerminalRawMode {
         stdout.flush().unwrap();
     }
 
-    fn get_curso_position() {
+    fn get_cursor_position() -> Result<(u16, u16)> {
         TerminalRawMode::write_escape_seq("\x1b[6n");
-        print!("\r\n");
+
         let mut buffer = [0; 1];
-        while io::stdin().read_exact(&mut buffer).is_ok() {
-            if buffer[0].is_ascii_control() {
-                print!("{}\r\n",buffer[0] as u32)
-            } else {
-                println!("{} ('{}')", buffer[0] as u32, buffer[0]);
+        let mut position = String::new();
+        let stdin = io::stdin();
+        let mut handle = stdin.lock();
+
+        loop {
+            match handle.read(&mut buffer) {
+                Ok(1) => {
+                    let c = buffer[0] as char;
+                    position.push(c);
+                    if c == 'R' {
+                        break;
+                    }
+                }
+                Ok(_) => continue,
+                Err(e) => return Err(e),
             }
         }
-        TerminalRawMode::editor_read_key();
+
+        if position.starts_with("\x1b[") && position.ends_with('R') {
+            let coords: Vec<&str> = position[2..position.len() - 1].split(';').collect();
+            if coords.len() == 2 {
+                if let (Ok(cols), Ok(rows)) = (coords[1].parse::<u16>(), coords[0].parse::<u16>()) {
+                    return Ok((cols, rows));
+                }
+            }
+        }
+        Err(io::Error::new(io::ErrorKind::Other, "Failed to get cursor position."))
     }
 
-    fn get_window_size() -> (u16,u16){
+    fn get_window_size() -> Result<(u16,u16)>{
         TerminalRawMode::write_escape_seq("\x1b[999C\x1b[999B");
-        TerminalRawMode::editor_read_key();
-        // return TerminalRawMode::get_curso_position();
-        (80,24)
-        // let terminal_size = match terminal_size() {
-        //     Ok(term_size) => term_size,
+        TerminalRawMode::get_cursor_position()
+        // match terminal_size() {
+        //     Ok((cols, rows))  => Ok((cols,rows)),
         //     Err(_) => {
-        //         self.write_escape_seq("\x1b[999C\x1b[999B");
-        //         self.editor_read_key();
+        //         TerminalRawMode::write_escape_seq("\x1b[999C\x1b[999B");
+        //         TerminalRawMode::get_cursor_position()
         //     }
-        // };
+        // }
     }
 }
 
