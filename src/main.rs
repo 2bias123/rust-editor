@@ -131,15 +131,13 @@ impl TerminalRawMode {
     }
 
     fn get_window_size() -> Result<(u16,u16)>{
-        TerminalRawMode::write_escape_seq("\x1b[999C\x1b[999B");
-        TerminalRawMode::get_cursor_position()
-        // match terminal_size() {
-        //     Ok((cols, rows))  => Ok((cols,rows)),
-        //     Err(_) => {
-        //         TerminalRawMode::write_escape_seq("\x1b[999C\x1b[999B");
-        //         TerminalRawMode::get_cursor_position()
-        //     }
-        // }
+        match terminal_size() {
+            Ok((cols, rows))  => Ok((cols,rows)),
+            Err(_) => {
+                TerminalRawMode::write_escape_seq("\x1b[999C\x1b[999B");
+                TerminalRawMode::get_cursor_position()
+            }
+        }
     }
 }
 
