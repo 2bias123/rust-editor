@@ -76,29 +76,34 @@ impl TerminalRawMode {
         }
     }
 
-
-    fn editor_draw_rows(&self) {
+    fn editor_draw_rows(&self) -> Result<()> {
         for y in 0..self.screen_rows{
-            TerminalRawMode::write_escape_seq("~\r\n");
-        }
-    }
+            TerminalRawMode::write("~");
 
-    fn editor_refresh_screen(&self) -> Result<()>{
-        TerminalRawMode::write_escape_seq("\x1b[2J");
-        TerminalRawMode::write_escape_seq("\x1b[H");
-        self.editor_draw_rows();
-        TerminalRawMode::write_escape_seq("\x1b[H");
+            if y < self.screen_rows - 1 {
+                TerminalRawMode::write("\r\n");
+            }
+        }
         Ok(())
     }
 
-    fn write_escape_seq(seq: &str) {
+    fn editor_refresh_screen(&self) -> Result<()>{
+        TerminalRawMode::write("\x1b[2J");
+        TerminalRawMode::write("\x1b[H");
+        self.editor_draw_rows();
+        TerminalRawMode::write("\x1b[H");
+        Ok(())
+    }
+
+    fn write(seq: &str) -> Result<()>{
         let mut stdout = io::stdout().lock();
         stdout.write_all(seq.as_bytes()).unwrap();
         stdout.flush().unwrap();
+        Ok(())
     }
 
     fn get_cursor_position() -> Result<(u16, u16)> {
-        TerminalRawMode::write_escape_seq("\x1b[6n");
+        TerminalRawMode::write("\x1b[6n");
 
         let mut buffer = [0; 1];
         let mut position = String::new();
@@ -134,7 +139,7 @@ impl TerminalRawMode {
         match terminal_size() {
             Ok((cols, rows))  => Ok((cols,rows)),
             Err(_) => {
-                TerminalRawMode::write_escape_seq("\x1b[999C\x1b[999B");
+                TerminalRawMode::write("\x1b[999C\x1b[999B");
                 TerminalRawMode::get_cursor_position()
             }
         }
@@ -158,6 +163,5 @@ fn main() -> Result<()> {
             break;
         }
     }
-
     Ok(())
 }
