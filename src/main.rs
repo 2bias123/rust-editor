@@ -1,12 +1,13 @@
 use std::io::{self, Read, Result, Write};
 use std::os::unix::io::AsRawFd;
-use termios::*;
 use termion::terminal_size;
+use termios::*;
 
 struct TerminalRawMode {
     screen_rows: u16,
     screen_cols: u16,
     original_termios: Termios,
+    version: String
 }
 
 impl TerminalRawMode {
@@ -14,7 +15,13 @@ impl TerminalRawMode {
         let stdin_fd = io::stdin().as_raw_fd();
         let original_termios = Termios::from_fd(stdin_fd)?;
         let (screen_cols, screen_rows) = Self::get_window_size()?;
-        Ok(TerminalRawMode { screen_rows, screen_cols, original_termios })
+        let version = String::from("0.0.1");
+        Ok(TerminalRawMode {
+            screen_rows,
+            screen_cols,
+            original_termios,
+            version
+        })
     }
 
     fn enable(&self) -> Result<()> {
@@ -51,16 +58,16 @@ impl TerminalRawMode {
             match handle.read(&mut buffer) {
                 Ok(0) => {
                     continue;
-                },
+                }
                 Ok(_) => {
                     return Ok(buffer[0] as char);
-                },
+                }
                 Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {
                     continue;
-                },
+                }
                 Err(e) => {
                     return Err(e);
-                },
+                }
             }
         }
     }
@@ -70,40 +77,64 @@ impl TerminalRawMode {
             Ok(c) if c as u8 == self.crtl_key('q') => {
                 self.editor_refresh_screen()?;
                 Ok(true)
-            },
+            }
             Ok(_) => Ok(false),
             Err(e) => Err(e),
         }
     }
 
-    fn editor_draw_rows(&self) -> Result<()> {
-        for y in 0..self.screen_rows{
-            TerminalRawMode::write("~");
+    fn editor_draw_rows(&self, buff: &mut String) -> Result<()> {
+        let welcome_msg = format!("Spaghetti editor -- verison {}",self.version);
+        for y in 0..self.screen_rows {
+            if y == self.screen_rows / 3 {
+                let welcome_len = welcome_msg.len() as u16;
+                let mut padding = (self.screen_cols.saturating_sub(welcome_len)) / 2;
 
+                if padding > 0{
+                    buff.push_str("~");
+                    padding -= 1;
+                }
+                while padding > 0 {
+                    padding -= 1;
+                    buff.push_str(" ")
+                }
+                buff.push_str(&welcome_msg);
+            } else {
+                buff.push_str("~");
+            }
+
+            buff.push_str("\x1b[K");
             if y < self.screen_rows - 1 {
-                TerminalRawMode::write("\r\n");
+                buff.push_str("\r\n");
             }
         }
         Ok(())
     }
 
-    fn editor_refresh_screen(&self) -> Result<()>{
-        TerminalRawMode::write("\x1b[2J");
-        TerminalRawMode::write("\x1b[H");
-        self.editor_draw_rows();
-        TerminalRawMode::write("\x1b[H");
+    fn editor_refresh_screen(&self) -> Result<()> {
+        let mut buff = String::new();
+
+        buff.push_str("\x1b[?25l");
+        buff.push_str("\x1b[H");
+
+        self.editor_draw_rows(&mut buff);
+
+        buff.push_str("\x1b[H");
+        buff.push_str("\x1b[?25h");
+
+        TerminalRawMode::write(&buff)?;
         Ok(())
     }
 
-    fn write(seq: &str) -> Result<()>{
+    fn write(seq: &str) -> Result<()> {
         let mut stdout = io::stdout().lock();
-        stdout.write_all(seq.as_bytes()).unwrap();
-        stdout.flush().unwrap();
+        stdout.write_all(seq.as_bytes())?;
+        stdout.flush()?;
         Ok(())
     }
 
     fn get_cursor_position() -> Result<(u16, u16)> {
-        TerminalRawMode::write("\x1b[6n");
+        TerminalRawMode::write("\x1b[6n")?;
 
         let mut buffer = [0; 1];
         let mut position = String::new();
@@ -132,14 +163,17 @@ impl TerminalRawMode {
                 }
             }
         }
-        Err(io::Error::new(io::ErrorKind::Other, "Failed to get cursor position."))
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "Failed to get cursor position.",
+        ))
     }
 
-    fn get_window_size() -> Result<(u16,u16)>{
+    fn get_window_size() -> Result<(u16, u16)> {
         match terminal_size() {
-            Ok((cols, rows))  => Ok((cols,rows)),
+            Ok((cols, rows)) => Ok((cols, rows)),
             Err(_) => {
-                TerminalRawMode::write("\x1b[999C\x1b[999B");
+                TerminalRawMode::write("\x1b[999C\x1b[999B")?;
                 TerminalRawMode::get_cursor_position()
             }
         }
@@ -148,7 +182,7 @@ impl TerminalRawMode {
 
 impl Drop for TerminalRawMode {
     fn drop(&mut self) {
-        let _ =self.editor_refresh_screen();
+        let _ = self.editor_refresh_screen();
         let _ = self.disable();
     }
 }
@@ -158,7 +192,7 @@ fn main() -> Result<()> {
     terminal_mode.enable()?;
 
     loop {
-        terminal_mode.editor_refresh_screen();
+        terminal_mode.editor_refresh_screen()?;
         if terminal_mode.editor_process_key_pressed()? {
             break;
         }
